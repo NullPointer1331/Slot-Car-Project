@@ -29,12 +29,17 @@ class MotorDriver:
         return speed
 
     def stop(self):
-        """Set both driver inputs low."""
+        """Set both driver inputs low to coast."""
         self._in1.duty_cycle = 0
         self._in2.duty_cycle = 0
 
+    def brake(self):
+        """Apply the DRV8871 brake state (IN1 low, IN2 high)."""
+        self._in1.duty_cycle = 0
+        self._in2.duty_cycle = 65535
+
     def deinit(self):
-        """Stop the motor and release both PWM outputs."""
-        self.stop()
+        """Brake the motor and release both PWM outputs."""
+        self.brake()
         self._in1.deinit()
         self._in2.deinit()

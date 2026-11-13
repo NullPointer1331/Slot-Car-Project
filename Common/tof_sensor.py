@@ -50,3 +50,7 @@ class TOFSensor:
             return True
 
         return False
+
+    def deinit(self):
+        """Stop ranging and release the sensor."""
+        self._sensor.stop_ranging()
