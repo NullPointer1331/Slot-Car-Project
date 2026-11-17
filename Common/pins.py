@@ -1,21 +1,19 @@
-"""CircuitPython pin assignments for the MSR ESP32 car."""
+"""MicroPython pin assignments for the MSR ESP32 car."""
 
-import board
-
-
-# Set for the Wokwi ESP32 DevKitC; the physical Feather V2 uses the alternate pins.
+# MicroPython uses the GPIO number directly instead of CircuitPython's board.IOxx
+# names. Keep the same physical layout as the original CircuitPython project.
 SIMULATION = False
 
-TRACK_V = board.IO34
-ENCODER = board.IO32
-I2C_SDA = board.IO22
-I2C_SCL = board.IO26 if SIMULATION else board.IO20
-SD_MISO = board.IO21
-MOTOR_NTC = board.IO39
-BATT_V = board.IO35
-MOTOR_IN1 = board.IO27
-MOTOR_IN2 = board.IO33
-SD_SCK = board.IO5
-SD_MOSI = board.IO19
-SD_CS = board.IO4
-LED = board.IO13
+TRACK_V = 34
+ENCODER = 32
+I2C_SDA = 22
+I2C_SCL = 26 if SIMULATION else 20
+SD_MISO = 21
+MOTOR_NTC = 39
+BATT_V = 35
+MOTOR_IN1 = 27
+MOTOR_IN2 = 33
+SD_SCK = 5
+SD_MOSI = 19
+SD_CS = 4
+LED = 13

@@ -2,9 +2,12 @@
 
 import time
 
-import busio
-import digitalio
+try:
+    import machine
+except ImportError:  # pragma: no cover - host builds do not use runtime hardware
+    machine = None
 
+from Common.clock import monotonic
 from Common.control import (
     BATT_PIT_V,
     CRASH,
@@ -40,14 +43,14 @@ LANDMARKS_PER_INCREMENT = 2
 MAX_THROTTLE = 1.0
 
 CSV_HEADER = (
-    "elapsed_s,landmark_count,distance_m,wheel_pulses,speed_m_s,"
+    "lap_id,elapsed_s,landmark_count,section_id,distance_m,wheel_pulses,speed_m_s,"
     "accel_x_m_s2,accel_y_m_s2,accel_z_m_s2,"
     "accel_x_g,accel_y_g,accel_z_g,"
     "gyro_x_dps,gyro_y_dps,gyro_z_dps,"
-    "magnetic_x_uT,magnetic_y_uT,magnetic_z_uT,imu_temp_c,"
+    "magnetic_x_uT,magnetic_y_uT,magnetic_z_uT,"
     "track_v,motor_temp_c,battery_v,fuel_gauge_voltage_v,fuel_percent,"
     "distance_cm,range_status,new_landmark,"
-    "state,requested_throttle,throttle_command,safety_cap\n"
+    "crash_event,state,requested_throttle,throttle_command,safety_cap\n"
 )
 
 
@@ -69,31 +72,37 @@ def log_sample(
 ):
     """Write one training sample and flush periodically."""
     row = [
+        sample["landmark_count"],
         "{:.3f}".format(elapsed_s),
         sample["landmark_count"],
+        0,
         "{:.3f}".format(sample["distance_m"]),
         sample["wheel_pulses"],
         "{:.3f}".format(sample["speed_m_s"]),
-        *vector_fields(sample["acceleration_m_s2"], 3),
-        *vector_fields(sample["acceleration_g"], 3),
-        *vector_fields(sample["gyro_dps"], 3),
-        *vector_fields(sample["magnetic_field_uT"], 3),
-        sample["temperature_c"],
-        "{:.3f}".format(sample["track_v"]),
-        "{:.2f}".format(sample["motor_temp_c"]),
-        "{:.3f}".format(sample["battery_v"]),
-        "{:.3f}".format(sample["fuel_gauge_voltage_v"]),
-        "{:.1f}".format(sample["fuel_percent"]),
-        sample["distance_cm"] if sample["distance_cm"] is not None else "",
-        sample["range_status"] if sample["range_status"] is not None else "",
-        1 if sample["new_landmark"] else 0,
-        control_data["state"],
-        "{:.2f}".format(requested_throttle),
-        "{:.2f}".format(control_data["throttle_command"]),
-        "{:.2f}".format(control_data["safety_cap"]),
     ]
+    row.extend(vector_fields(sample["acceleration_m_s2"], 3))
+    row.extend(vector_fields(sample["acceleration_g"], 3))
+    row.extend(vector_fields(sample["gyro_dps"], 3))
+    row.extend(vector_fields(sample["magnetic_field_uT"], 3))
+    row.extend(
+        [
+            "{:.3f}".format(sample["track_v"]),
+            "{:.2f}".format(sample["motor_temp_c"]),
+            "{:.3f}".format(sample["battery_v"]),
+            "{:.3f}".format(sample["fuel_gauge_voltage_v"]),
+            "{:.1f}".format(sample["fuel_percent"]),
+            sample["distance_cm"] if sample["distance_cm"] is not None else "",
+            sample["range_status"] if sample["range_status"] is not None else "",
+            1 if sample["new_landmark"] else 0,
+            1 if control_data["state"] == CRASH else 0,
+            control_data["state"],
+            "{:.2f}".format(requested_throttle),
+            "{:.2f}".format(control_data["throttle_command"]),
+            "{:.2f}".format(control_data["safety_cap"]),
+        ]
+    )
     logger.write_row(row)
-    now = time.monotonic()
+    now = monotonic()
     if force_flush or now - last_flush >= LOG_FLUSH_INTERVAL_S:
         logger.flush()
         return now
@@ -118,22 +127,21 @@ def deinitialize(controller, motor, monitor, status_led, i2c, logger, spi):
     finally:
         try:
             if status_led is not None:
-                status_led.value = False
-                status_led.deinit()
+                status_led.value(False)
         finally:
             try:
-                i2c.deinit()
+                if logger is not None:
+                    logger.deinit()
             finally:
-                try:
-                    if logger is not None:
-                        logger.deinit()
-                finally:
-                    if spi is not None:
-                        spi.deinit()
+                if spi is not None:
+                    spi.deinit()
 
 
 def main():
-    i2c = busio.I2C(I2C_SCL, I2C_SDA, frequency=400000)
+    if machine is None:
+        raise RuntimeError("This sketch requires MicroPython's machine module")
+
+    i2c = machine.I2C(0, scl=machine.Pin(I2C_SCL), sda=machine.Pin(I2C_SDA), freq=400000)
     motor = None
     monitor = None
     controller = None
@@ -143,23 +151,23 @@ def main():
 
     try:
         motor = MotorDriver(MOTOR_IN1, MOTOR_IN2)
-        status_led = digitalio.DigitalInOut(LED)
-        status_led.switch_to_output(value=False)
+        status_led = machine.Pin(LED, machine.Pin.OUT)
+        status_led.value(False)
         monitor = Monitor(i2c, TRACK_V, MOTOR_NTC, BATT_V, ENCODER)
 
         controller = VehicleController(monitor, motor)
         controller.calibrate()
 
-        spi = busio.SPI(SD_SCK, MOSI=SD_MOSI, MISO=SD_MISO)
+        spi = machine.SPI(1, sck=machine.Pin(SD_SCK), mosi=machine.Pin(SD_MOSI), miso=machine.Pin(SD_MISO))
         logger = SDCardCSVLogger(spi, SD_CS, LOG_FILE, CSV_HEADER)
-        start_time = time.monotonic()
+        start_time = monotonic()
         last_flush = start_time
         last_status = start_time
         pit_announced = False
         fault_active = False
 
         while True:
-            sample_time = time.monotonic()
+            sample_time = monotonic()
             sample = controller.read()
             landmark_count = sample["landmark_count"]
             requested_throttle = min(
@@ -188,7 +196,7 @@ def main():
             new_fault = fault and not fault_active
             fault_active = fault
             blink_period_s = 0.1 if fault else 0.5
-            status_led.value = int(sample_time / blink_period_s) % 2 == 0
+            status_led.value((int(sample_time / blink_period_s) % 2) == 0)
 
             last_flush = log_sample(
                 logger,
@@ -218,7 +226,7 @@ def main():
                 )
                 last_status = sample_time
 
-            time.sleep(max(0, LOOP_PERIOD_S - (time.monotonic() - sample_time)))
+            time.sleep(max(0, LOOP_PERIOD_S - (monotonic() - sample_time)))
     finally:
         deinitialize(controller, motor, monitor, status_led, i2c, logger, spi)
 

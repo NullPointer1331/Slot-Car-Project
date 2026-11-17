@@ -1,1 +1,1 @@
-"""Shared component drivers for CircuitPython."""
+"""Shared component drivers for the MicroPython ESP32 build."""

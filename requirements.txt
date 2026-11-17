@@ -1,8 +1,7 @@
+# Host-side model-development dependencies only.
+# The ESP32 firmware should run MicroPython directly.
+
 tensorflow
 tensorboard
-
-Adafruit-Blinka
-adafruit-circuitpython-sd
-adafruit-circuitpython-icm20x
-adafruit-circuitpython-vl53l4cd
-adafruit-circuitpython-max1704x
+pandas
+numpy

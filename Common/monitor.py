@@ -1,7 +1,6 @@
 """Unified readings and landmark tracking for the car's sensors."""
 
-import time
-
+from Common.clock import monotonic
 from Common.fuel_gauge import FuelGauge
 from Common.imu import IMU
 from Common.tof_sensor import TOFSensor
@@ -34,7 +33,7 @@ class Monitor:
         self.landmark_count = 0
         self.distance_m = 0.0
         self.speed_m_s = 0.0
-        self._last_sample_time = time.monotonic()
+        self._last_sample_time = monotonic()
 
     def calibrate(self):
         """Calibrate the IMU gyro while the car is stationary."""
@@ -42,7 +41,7 @@ class Monitor:
 
     def read(self):
         """Return one combined sensor sample and update landmark odometry."""
-        now = time.monotonic()
+        now = monotonic()
         vehicle = self._vehicle.read()
         imu = self._imu.read()
         tof = self._tof.read()
