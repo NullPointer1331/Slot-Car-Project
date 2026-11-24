@@ -31,11 +31,23 @@ MODEL_PATH = "/throttle_model.json"
 
 def feature_values(model, sample):
     """Build the model feature vector in the exported feature order."""
+    if not sample.get("imu_valid", False):
+        raise ValueError("IMU feature sample is invalid")
+    turn_type = sample["turn_type"]
+    grade_type = sample["grade_type"]
+    if turn_type not in ("straight", "left", "right"):
+        raise ValueError("Unknown turn type: {}".format(turn_type))
+    if grade_type not in ("level", "uphill", "downhill"):
+        raise ValueError("Unknown grade type: {}".format(grade_type))
     acceleration = sample["acceleration_m_s2"]
     gyro = sample["gyro_dps"]
     values = {
-        "section_id": int(sample.get("section_id", 0)),
-        "distance_m": sample["distance_m"],
+        "turn_left": 1.0 if turn_type == "left" else 0.0,
+        "turn_right": 1.0 if turn_type == "right" else 0.0,
+        "grade_uphill": 1.0 if grade_type == "uphill" else 0.0,
+        "grade_downhill": 1.0 if grade_type == "downhill" else 0.0,
+        "lap_distance_m": sample["lap_distance_m"],
+        "total_distance_m": sample["total_distance_m"],
         "speed_m_s": sample["speed_m_s"],
         "accel_x_m_s2": acceleration[0] if acceleration else 0.0,
         "accel_y_m_s2": acceleration[1] if acceleration else 0.0,
@@ -43,7 +55,7 @@ def feature_values(model, sample):
         "gyro_x_dps": gyro[0] if gyro else 0.0,
         "gyro_y_dps": gyro[1] if gyro else 0.0,
         "gyro_z_dps": gyro[2] if gyro else 0.0,
-        "requested_throttle": sample.get("_previous_throttle", 0.0),
+        "previous_throttle": sample["previous_throttle"],
     }
     return [values[name] for name in model.features]
 
@@ -79,18 +91,26 @@ def main():
             print("MODEL unavailable; using safe fixed throttle:", model_error)
 
         previous_throttle = 0.0
+        model_input_fault_active = False
         start_time = monotonic()
         while True:
             sample_time = monotonic()
             sample = controller.read()
-            sample["_previous_throttle"] = previous_throttle
+            sample["previous_throttle"] = previous_throttle
 
             requested_throttle = SAFE_FALLBACK_THROTTLE
             if model is not None:
                 try:
                     requested_throttle = model.predict(feature_values(model, sample))
-                except (KeyError, IndexError, TypeError, ValueError, OSError):
+                except (KeyError, IndexError, TypeError, ValueError, OSError) as error:
                     requested_throttle = SAFE_FALLBACK_THROTTLE
+                    if not model_input_fault_active:
+                        print("MODEL input unavailable; using safe fallback:", error)
+                    model_input_fault_active = True
+                else:
+                    if model_input_fault_active:
+                        print("MODEL inputs recovered")
+                    model_input_fault_active = False
 
             control_data = controller.update(
                 now_ms=(sample_time - start_time) * 1000,
@@ -109,4 +129,5 @@ def main():
             motor.deinit()
 
 
-main()
+if __name__ == "__main__":
+    main()

@@ -45,6 +45,8 @@ class VehicleController:
 
     def _safety_cap(self, sample):
         cap = max(0.0, min(1.0, self.throttle_cap))
+        if sample.get("imu_valid", True) is False:
+            return 0.0
         if sample["track_v"] < TRACK_OK_V:
             return 0.0
         if sample["motor_temp_c"] > TEMP_DERATE_C:

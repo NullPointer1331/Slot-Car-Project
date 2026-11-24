@@ -9,7 +9,7 @@ class ThrottleModel:
     def __init__(self, model_path):
         with open(model_path, "r") as model_file:
             model = json.load(model_file)
-        if model.get("format") != "msr_dense_v1":
+        if model.get("format") != "msr_dense_v2":
             raise ValueError("Unsupported throttle model format")
         self.features = model["features"]
         self.mean = model["mean"]
@@ -54,12 +54,19 @@ class ThrottleModel:
             values = output
 
         prediction = max(0.0, min(1.0, values[0]))
-        section_id = None
+        turn_type = "straight"
+        grade_type = "level"
         for index, name in enumerate(self.features):
-            if name == "section_id":
-                section_id = str(int(feature_values[index]))
-                break
-        if section_id in self.section_caps:
-            prediction = min(prediction, float(self.section_caps[section_id]))
+            if name == "turn_left" and float(feature_values[index]) >= 0.5:
+                turn_type = "left"
+            elif name == "turn_right" and float(feature_values[index]) >= 0.5:
+                turn_type = "right"
+            elif name == "grade_uphill" and float(feature_values[index]) >= 0.5:
+                grade_type = "uphill"
+            elif name == "grade_downhill" and float(feature_values[index]) >= 0.5:
+                grade_type = "downhill"
+        section_type = "{}|{}".format(turn_type, grade_type)
+        if section_type in self.section_caps:
+            prediction = min(prediction, float(self.section_caps[section_type]))
         return prediction
 

@@ -1,5 +1,6 @@
 """Capture labelled sensor and throttle samples for car-control model training."""
 
+import random
 import time
 
 try:
@@ -43,14 +44,15 @@ LANDMARKS_PER_INCREMENT = 2
 MAX_THROTTLE = 1.0
 
 CSV_HEADER = (
-    "lap_id,elapsed_s,landmark_count,section_id,distance_m,wheel_pulses,speed_m_s,"
+    "run_id,lap_id,elapsed_s,landmark_count,turn_type,grade_type,lap_distance_m,"
+    "total_distance_m,wheel_pulses,speed_m_s,"
     "accel_x_m_s2,accel_y_m_s2,accel_z_m_s2,"
     "accel_x_g,accel_y_g,accel_z_g,"
-    "gyro_x_dps,gyro_y_dps,gyro_z_dps,"
+    "gyro_x_dps,gyro_y_dps,gyro_z_dps,imu_valid,"
     "magnetic_x_uT,magnetic_y_uT,magnetic_z_uT,"
     "track_v,motor_temp_c,battery_v,fuel_gauge_voltage_v,fuel_percent,"
     "distance_cm,range_status,new_landmark,"
-    "crash_event,state,requested_throttle,throttle_command,safety_cap\n"
+    "crash_event,state,previous_throttle,requested_throttle,throttle_command,safety_cap\n"
 )
 
 
@@ -65,6 +67,8 @@ def log_sample(
     logger,
     sample,
     control_data,
+    run_id,
+    previous_throttle,
     requested_throttle,
     elapsed_s,
     last_flush,
@@ -72,17 +76,21 @@ def log_sample(
 ):
     """Write one training sample and flush periodically."""
     row = [
-        sample["landmark_count"],
+        run_id,
+        sample["lap_id"],
         "{:.3f}".format(elapsed_s),
         sample["landmark_count"],
-        0,
-        "{:.3f}".format(sample["distance_m"]),
+        sample["turn_type"],
+        sample["grade_type"],
+        "{:.3f}".format(sample["lap_distance_m"]),
+        "{:.3f}".format(sample["total_distance_m"]),
         sample["wheel_pulses"],
         "{:.3f}".format(sample["speed_m_s"]),
     ]
     row.extend(vector_fields(sample["acceleration_m_s2"], 3))
     row.extend(vector_fields(sample["acceleration_g"], 3))
     row.extend(vector_fields(sample["gyro_dps"], 3))
+    row.append(1 if sample["imu_valid"] else 0)
     row.extend(vector_fields(sample["magnetic_field_uT"], 3))
     row.extend(
         [
@@ -96,6 +104,7 @@ def log_sample(
             1 if sample["new_landmark"] else 0,
             1 if control_data["state"] == CRASH else 0,
             control_data["state"],
+            "{:.2f}".format(previous_throttle),
             "{:.2f}".format(requested_throttle),
             "{:.2f}".format(control_data["throttle_command"]),
             "{:.2f}".format(control_data["safety_cap"]),
@@ -161,10 +170,12 @@ def main():
         spi = machine.SPI(1, sck=machine.Pin(SD_SCK), mosi=machine.Pin(SD_MOSI), miso=machine.Pin(SD_MISO))
         logger = SDCardCSVLogger(spi, SD_CS, LOG_FILE, CSV_HEADER)
         start_time = monotonic()
+        run_id = "{:08x}".format(random.getrandbits(32))
         last_flush = start_time
         last_status = start_time
         pit_announced = False
         fault_active = False
+        previous_throttle = 0.0
 
         while True:
             sample_time = monotonic()
@@ -202,11 +213,14 @@ def main():
                 logger,
                 sample,
                 control_data,
+                run_id,
+                previous_throttle,
                 requested_throttle,
                 sample_time - start_time,
                 last_flush,
                 force_flush=new_fault,
             )
+            previous_throttle = throttle_command
 
             battery_low = sample["battery_v"] < BATT_PIT_V
             if battery_low and not pit_announced:
@@ -214,10 +228,13 @@ def main():
             pit_announced = battery_low
             if sample_time - last_status >= 5.0:
                 print(
-                    "landmarks={} distance={:.2f} m speed={:.2f} m/s "
+                    "lap={} landmarks={} lap_distance={:.2f} m "
+                    "total_distance={:.2f} m speed={:.2f} m/s "
                     "state={} throttle={:.2f} cap={:.2f}".format(
+                        sample["lap_id"],
                         landmark_count,
-                        sample["distance_m"],
+                        sample["lap_distance_m"],
+                        sample["total_distance_m"],
                         sample["speed_m_s"],
                         state,
                         throttle_command,
