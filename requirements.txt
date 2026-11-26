@@ -1,2 +1,7 @@
+# Host-side model-development dependencies only.
+# The ESP32 firmware should run MicroPython directly.
+esptool
 tensorflow
 tensorboard
+pandas
+numpy
